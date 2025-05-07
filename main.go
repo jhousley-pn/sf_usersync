@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 
 	_ "github.com/lib/pq"
 )
@@ -36,6 +37,7 @@ func main() {
 	})
 
 	http.HandleFunc("/sync-users", syncUsersHandler)
+	http.HandleFunc("/get-pin", getPinHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -59,6 +61,8 @@ func syncUsersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, u := range users {
+		normalizedPhone := normalizePhone(u.Phone)
+
 		_, err := db.Exec(`
 			INSERT INTO sf_users (
 				id, username, email, first_name, last_name, phone, pin, created_at
@@ -70,7 +74,7 @@ func syncUsersHandler(w http.ResponseWriter, r *http.Request) {
 				last_name = EXCLUDED.last_name,
 				phone = EXCLUDED.phone,
 				pin = EXCLUDED.pin;
-		`, u.ID, u.Username, u.Email, u.FirstName, u.LastName, u.Phone, u.Pin, u.CreatedAt)
+		`, u.ID, u.Username, u.Email, u.FirstName, u.LastName, normalizedPhone, u.Pin, u.CreatedAt)
 
 		if err != nil {
 			log.Printf("DB error for user %s: %v\n", u.ID, err)
@@ -79,4 +83,48 @@ func syncUsersHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("User sync complete"))
+}
+
+func getPinHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	phoneRaw := r.URL.Query().Get("phone")
+	if phoneRaw == "" {
+		http.Error(w, "Missing phone parameter", http.StatusBadRequest)
+		return
+	}
+
+	normalized := normalizePhone(phoneRaw)
+	if len(normalized) != 10 {
+		http.Error(w, "Phone number must be 10 digits", http.StatusBadRequest)
+		return
+	}
+
+	var pin sql.NullString
+	err := db.QueryRow(`SELECT pin FROM sf_users WHERE phone = $1`, normalized).Scan(&pin)
+	if err == sql.ErrNoRows {
+		http.Error(w, "PIN not found for phone number", http.StatusNotFound)
+		return
+	} else if err != nil {
+		log.Println("Query error:", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"phone": normalized,
+		"pin":   pin.String,
+	})
+}
+
+func normalizePhone(raw string) string {
+	re := regexp.MustCompile(`\D`)
+	digitsOnly := re.ReplaceAllString(raw, "")
+	if len(digitsOnly) > 10 {
+		digitsOnly = digitsOnly[len(digitsOnly)-10:]
+	}
+	return digitsOnly
 }
