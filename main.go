@@ -32,6 +32,11 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Heroku Go API is running ✅"))
+	})
+
 	log.Println("Listening on port", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
