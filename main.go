@@ -104,7 +104,7 @@ func getPinHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var pin sql.NullString
-	err := db.QueryRow(`SELECT pin FROM sf_users WHERE phone = $1`, normalized).Scan(&pin)
+	err := db.QueryRow(`SELECT pin FROM sf_users WHERE REGEXP_REPLACE(phone, '\D', '', 'g') = $1`, normalized).Scan(&pin)
 	if err == sql.ErrNoRows {
 		http.Error(w, "PIN not found for phone number", http.StatusNotFound)
 		return
